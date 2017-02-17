@@ -4,6 +4,8 @@ class Ec2ssh < Formula
   sha256 "df54b690be920eaf67d16f9761e03b72fb02f46fe69aa5f4e0abb14af6b3034a"
   version "1.0"
 
+  depends_on "jq"
+
   def install
     bin.install "ec2ssh"
   end
