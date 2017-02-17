@@ -1,0 +1,119 @@
+#!/bin/bash
+#---------------------------------------------
+# EC2 SSH
+#
+# select target from instace list
+#---------------------------------------------
+#
+#  ssh example) $ ec2ssh profile1
+#
+#  download file example)
+#  $ ec2ssh profile1 get /tmp/log.tgz ~/work/
+#
+#  upload file example)
+#  $ ec2ssh profile1 put batch.sh /tmp
+#
+#
+#  If you want to hook pre and post command,
+#  put ~/.ec2ssh-pre or ~/.ec2ssh-post
+#  pre|post script is called with arguments:
+#     $1 = EC2 IP Address
+#     $2 = profile
+#     $3 = action
+#     $4 = source path
+#     $5 = destination path
+#
+#---------------------------------------------
+
+EC2USER=ec2-user
+ALIVEINTERVAL=30
+
+
+profile=$1
+action=$2
+src=$3
+dest=$4
+if [ "$profile" == "" ]; then
+  name=`basename $0`
+  echo "Usage: $name <aws profile> [action] [src] [dest]"
+  echo -n "  aws profiles)"
+  for pf in `grep -e "\[[a-z\-]*\]" ~/.aws/credentials | sed 's/\[//;s/\]//'`
+  do
+    echo -n " $pf"
+  done
+  echo -e "\n  action) get put"
+  exit 1
+fi
+
+
+iplist=()
+dnslist=()
+keylist=()
+index=0
+
+IFS=$'\n'
+for line in `aws ec2 describe-instances \
+   --filter "Name=instance-state-name,Values=running" \
+   --profile $profile \
+  | jq '.Reservations[].Instances[] | {InstanceId, PublicIpAddress, PublicDnsName, KeyName, InstanceName: (.Tags[]? | select(.Key=="Name").Value)}' 2> /dev/null \
+  | jq 'sort_by(.InstanceName) | .[]' --slurp \
+  | jq -r '[.PublicIpAddress, .InstanceId, .InstanceName, .KeyName, .PublicDnsName] | @tsv'`
+do
+  IFS=$'\t'
+  item=( $line )
+  IFS=$'\n'
+
+  if [ "${item[3]}" != "" ]; then
+    iplist+=( ${item[0]} )
+    keylist+=( ${item[3]} )
+    dnslist+=( ${item[4]} )
+    echo -e "\033[36;7m $index \033[m \033[36m${item[2]}\033[m\t${item[0]}\t${item[1]}\t${item[3]}"
+    index=$((index + 1))
+    count=$index
+  fi
+done
+
+if [ $count -eq 0 ]; then
+  echo "Not found EC2 instances"
+  exit 1
+fi
+
+echo -n "Input target EC2 number> "
+read INPUT
+index=$INPUT
+
+if [ "$index" != "" ] && [ $index -lt $count ]; then
+  hostip=${iplist[$index]}
+  host=${dnslist[$index]}
+  pemfile=${keylist[${index}]}
+
+  sshopt="-o ServerAliveInterval=$ALIVEINTERVAL -o StrictHostKeyChecking=no"
+
+  if [ -f ~/.ec2ssh-pre ]; then
+    . ~/.ec2ssh-pre $hostip $profile $action $src $dest
+  fi
+
+  if [ "$bastion" != "" ]; then
+    sshopt=$sshopt' -o ProxyCommand="ssh -W %h:%p '$bastion'"'
+  fi
+
+  if [ "$action" == "get" ]; then
+    if [ "$dest" == "" ]; then
+      dest="."
+    fi
+    cmd="scp $sshopt -i ~/.ssh/${pemfile}.pem $EC2USER@$host:$src $dest"
+  elif [ "$action" == "put" ]; then
+    if [ "$dest" == "" ]; then
+      dest="~"
+    fi
+    cmd="scp $sshopt -i ~/.ssh/${pemfile}.pem $src $EC2USER@$host:$dest"
+  else
+    cmd="ssh $sshopt -l $EC2USER -i ~/.ssh/${pemfile}.pem $host"
+  fi
+
+  eval $cmd
+
+  if [ -f ~/.ec2ssh-post ]; then
+    . ~/.ec2ssh-post $hostip $profile $action $src $dest
+  fi
+fi

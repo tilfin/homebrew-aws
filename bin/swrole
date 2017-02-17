@@ -1,0 +1,117 @@
+#!/bin/bash
+#=======================
+#
+# IAM Switch Role Shell
+#
+#=======================
+
+script_name=`basename $0`
+INI_FILE=$HOME/.aws/config
+
+if [ ! -f $INI_FILE ]; then
+  echo >&2 "Not found ~/.aws/config"
+  echo >&2 "------------------------------"
+  echo >&2 "[profile dest]"
+  echo >&2 "role_arn = arn:aws:iam::<Account ID>:role/<role>"
+  echo >&2 "source_profile = <AWS Profile>"
+  echo >&2 "color = <ANSI Color>"
+  echo >&2 "------------------------------"
+  exit 2
+fi
+
+while getopts "o" flag; do
+  case $flag in
+    \?) OPT_ERROR=1; break;;
+    o) out_exports=true;;
+  esac
+done
+
+shift $(( $OPTIND - 1 ))
+
+if [ $OPT_ERROR ]; then
+  echo >&2 "Usage: $script_name [-o] <aws profile>"
+  exit 1
+fi
+
+DEST_AWS=$1
+
+if [ "$DEST_AWS" == "" ]; then
+  echo >&2 "Usage: $script_name [-o] <aws profile>"
+  echo >&2 ""
+  echo >&2 "Defined profiles:"
+  IFS=$'\n'
+  for i in `grep -E '\[profile\s.+\]' $INI_FILE`
+  do
+    echo $i | sed 's/\[profile /   /' | sed 's/\]//' | cat >&2
+  done
+  exit 2
+fi
+
+function parse_ini() {
+  target="profile $1"
+
+  eval `sed -e 's/[[:space:]]*\=[[:space:]]*/=/g' \
+    -e 's/;.*$//' \
+    -e 's/[[:space:]]*$//' \
+    -e 's/^[[:space:]]*//' \
+    -e "s/^\(.*\)=\([^\"']*\)$/\1=\"\2\"/" \
+   < $INI_FILE \
+    | sed -n -e "/^\[$target\]/,/^\s*\[/{/^[^;].*\=.*/p;}"`
+}
+
+parse_ini $DEST_AWS
+
+if [ "$source_profile" != "" ]; then
+  profile="--profile $source_profile"
+else
+  profile=""
+fi
+
+if [ -z "${color+x}" ]; then
+  color="001"
+fi
+
+if [ -z "${mfa_serial+x}" ]; then
+  awsarg=""
+else
+  echo -n "Enter MFA code> "
+  read TOKEN
+  if [ "$TOKEN" = "" ]; then
+    exit 1
+  fi
+  awsarg="--serial-number $mfa_serial --token-code $TOKEN"
+fi
+
+if [ "$external_id" != "" ]; then
+  awsarg="$awsarg --external-id $external_id"
+fi
+
+sess_name="my_$DES_AWS_session"
+
+result=`aws sts assume-role --role-arn $role_arn --role-session-name $sess_name $awsarg $profile`
+if [ $? -ne 0 ]; then
+  echo "Failed"
+  exit 1
+fi
+
+line=`echo $result | jq -r '.Credentials | [.AccessKeyId, .SecretAccessKey, .SessionToken] | @tsv'`
+IFS=$'\t'
+item=( $line )
+access_key=${item[0]}
+secret_key=${item[1]}
+sess_token=${item[2]}
+
+begin_color="\033["
+aws_color="${begin_color}${color};1m"
+
+if [ $out_exports ]; then
+  echo "export AWS_ACCESS_KEY_ID=$access_key"
+  echo "export AWS_SECRET_ACCESS_KEY=$secret_key"
+  echo "export AWS_SESSION_TOKEN=\"$sess_token\""
+else
+  AWS_ACCESS_KEY_ID=$access_key \
+  AWS_SECRET_ACCESS_KEY=$secret_key \
+  AWS_SESSION_TOKEN=$sess_token \
+  PROMPT_COMMAND="echo -e '\nSwitching: $aws_color$DEST_AWS\033[0m'" \
+    bash
+fi
