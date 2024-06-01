@@ -79,12 +79,22 @@ $ brew install swrole
 ### How to use
 
 ```
-$ swrole [-o] <aws profile>
+$ swrole [-j] [-o] [-t <OTP>] <aws_profile>
 ```
 
-* Enter forked _bash_ that export AWS_XXX environments without `-o` option
-* Print AWS_XXX environments with `-o`
-* Be careful that session will be expired in a hour.
+- `-j`: Output JSON for AWS credential_process.
+- `-o`: Output AWS credentials values as environment variable definitions.
+- `-t <onetime_code>`: Specify a onetime code, e.g., `-t 123456`.
+
+* Enter forked bash that exports AWS_XXX environments if neither `-o` nor `-j` option is specified.
+* Be careful that the session will expire in an hour.
+
+### Configuration Fields
+
+Add the following fields to `~/.aws/config`:
+
+- `color`: Specify a color for the profile name in the forked bash.
+- `generate_token`: Automatically obtain OTP by executing the specified command for profiles with `mfa_serial` defined.
 
 ### Screenshot
 
