@@ -1,8 +1,8 @@
 class Swrole < Formula
   homepage "https://github.com/tilfin/homebrew-aws"
   url "https://raw.githubusercontent.com/tilfin/homebrew-aws/master/bin/swrole"
-  sha256 "c893c5badc5bccda05a8681c82e3efd9c7360049b1a1bef82f6a5feedcb503f1"
-  version "1.0"
+  sha256 "ecd4b5ce743910245f7d5bca8f7487b9fadd6f01bcc4a7ad10c17b368eabdc76"
+  version "1.1"
 
   depends_on "jq"
 

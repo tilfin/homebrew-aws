@@ -19,24 +19,36 @@ if [ ! -f $INI_FILE ]; then
   exit 2
 fi
 
-while getopts "o" flag; do
+while getopts "jot:" flag; do
   case $flag in
     \?) OPT_ERROR=1; break;;
+    j) out_cred_json=true;;
     o) out_exports=true;;
+    t) TOKEN=$OPTARG ;;
   esac
 done
 
 shift $(( $OPTIND - 1 ))
 
 if [ $OPT_ERROR ]; then
-  echo >&2 "Usage: $script_name [-o] <aws profile>"
+  cat >&2 << EOF
+Usage: $script_name [-j] [-o] [-t <OTP>] <aws_profile>
+
+Options:
+  -j    Output JSON for AWS credential_process.
+  -o    Output AWS credentials values as environment variable definitions.
+  -t    Specify a one-time password, e.g., -t 123456.
+
+Arguments:
+  <aws_profile>    AWS profile to use.
+EOF
   exit 1
 fi
 
 DEST_AWS=$1
 
 if [ "$DEST_AWS" == "" ]; then
-  echo >&2 "Usage: $script_name [-o] <aws profile>"
+  echo >&2 "Usage: $script_name [-j] [-o] [-t <OTP>] <aws_profile>"
   echo >&2 ""
   echo >&2 "Defined profiles:"
   IFS=$'\n'
@@ -50,13 +62,14 @@ fi
 function parse_ini() {
   target="profile $1"
 
-  eval `sed -e 's/[[:space:]]*\=[[:space:]]*/=/g' \
+  eval $(sed -e 's/[[:space:]]*\=[[:space:]]*/=/g' \
     -e 's/;.*$//' \
     -e 's/[[:space:]]*$//' \
     -e 's/^[[:space:]]*//' \
-    -e "s/^\(.*\)=\([^\"']*\)$/\1=\"\2\"/" \
+    -e 's/"/\\"/g' \
+    -e "s/^\([^=]*\)=\(.*\)$/\1=\"\2\"/" \
    < $INI_FILE \
-    | sed -n -e "/^\[$target\]/,/^\s*\[/{/^[^;].*\=.*/p;}"`
+    | sed -n -e "/^\[$target\]/,/^\s*\[/{/^[^;].*\=.*/p;}")
 }
 
 parse_ini $DEST_AWS
@@ -74,10 +87,16 @@ fi
 if [ -z "${mfa_serial+x}" ]; then
   awsarg=""
 else
-  echo -n "Enter MFA code> "
-  read TOKEN
-  if [ "$TOKEN" = "" ]; then
-    exit 1
+  if [ "$TOKEN" == "" ]; then
+    if [ "$generate_token" != "" ]; then
+      TOKEN=$(eval $generate_token)
+    else
+      echo -n "Enter MFA code> "
+      read TOKEN
+      if [ "$TOKEN" = "" ]; then
+        exit 1
+      fi
+    fi
   fi
   awsarg="--serial-number $mfa_serial --token-code $TOKEN"
 fi
@@ -92,6 +111,12 @@ result=`aws sts assume-role --role-arn $role_arn --role-session-name $sess_name 
 if [ $? -ne 0 ]; then
   echo "Failed"
   exit 1
+fi
+
+if [ $out_cred_json ]; then
+  credjson=`echo $result | jq '.Credentials + {Version: 1}'`
+  echo $credjson
+  exit 0
 fi
 
 line=`echo $result | jq -r '.Credentials | [.AccessKeyId, .SecretAccessKey, .SessionToken] | @tsv'`
