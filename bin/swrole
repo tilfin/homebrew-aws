@@ -19,24 +19,26 @@ if [ ! -f $INI_FILE ]; then
   exit 2
 fi
 
-while getopts "o" flag; do
+while getopts "jot:" flag; do
   case $flag in
     \?) OPT_ERROR=1; break;;
+    j) out_cred_json=true;;
     o) out_exports=true;;
+    t) TOKEN=$OPTARG ;;
   esac
 done
 
 shift $(( $OPTIND - 1 ))
 
 if [ $OPT_ERROR ]; then
-  echo >&2 "Usage: $script_name [-o] <aws profile>"
+  echo >&2 "Usage: $script_name [-j] [-o] [-t] <aws profile>"
   exit 1
 fi
 
 DEST_AWS=$1
 
 if [ "$DEST_AWS" == "" ]; then
-  echo >&2 "Usage: $script_name [-o] <aws profile>"
+  echo >&2 "Usage: $script_name [-j] [-o] [-t] <aws profile>"
   echo >&2 ""
   echo >&2 "Defined profiles:"
   IFS=$'\n'
@@ -74,10 +76,16 @@ fi
 if [ -z "${mfa_serial+x}" ]; then
   awsarg=""
 else
-  echo -n "Enter MFA code> "
-  read TOKEN
-  if [ "$TOKEN" = "" ]; then
-    exit 1
+  if [ "$TOKEN" == "" ]; then
+    if [ "$generate_token" != "" ]; then
+      TOKEN=$($generate_token)
+    else
+      echo -n "Enter MFA code> "
+      read TOKEN
+      if [ "$TOKEN" = "" ]; then
+        exit 1
+      fi
+    fi
   fi
   awsarg="--serial-number $mfa_serial --token-code $TOKEN"
 fi
@@ -92,6 +100,12 @@ result=`aws sts assume-role --role-arn $role_arn --role-session-name $sess_name 
 if [ $? -ne 0 ]; then
   echo "Failed"
   exit 1
+fi
+
+if [ $out_cred_json ]; then
+  credjson=`echo $result | jq '.Credentials + {Version: 1}'`
+  echo $credjson
+  exit 0
 fi
 
 line=`echo $result | jq -r '.Credentials | [.AccessKeyId, .SecretAccessKey, .SessionToken] | @tsv'`
